@@ -4,8 +4,8 @@ An implementation of a deniable storage system.
 The storage system lets you access block devices by providing a key to access
 them.
 
-
 Need to think of something to use the spare space in the row objects.
+32 bytes + 4 * 31. maybe construct a tree to store partition bitmaps.
 """
 import math
 import secrets
@@ -62,10 +62,9 @@ def pack_nonce_and_authtag(nonce, authtag):
     """
     pack the nonce and authtag into BLOCK_ROW_DATA bytes
     """
-    padding = BLOCK_ROW_DATA - len(nonce + authtag)
     assert len(nonce) == 12
     assert len(authtag) == 16
-    return nonce + authtag + secrets.token_bytes(padding)
+    return nonce + authtag
 
 
 def unpack_nonce_and_authtag(data):
@@ -204,10 +203,11 @@ class GlomarRow:
             block = GlomarBlock(self._offset + i, get_block(data, i))
             self._blocks.append(block)
             nonce, authtag = unpack_nonce_and_authtag(
-                get_block(index_block, i, BLOCK_ROW_DATA)
+                get_block(index_block, i - 1, BLOCK_ROW_DATA)
             )
             self._nonces.append(nonce)
             self._authtags.append(authtag)
+        self._metadata = index_block[BLOCK_ROW_DATA * (BLOCKS_PER_ROW - 1):]
 
     def set_and_encrypt(self, idx, key, data):
         """
@@ -237,18 +237,27 @@ class GlomarRow:
             )
         raise Exception(f'Could not find block index {idx}')
 
+    def get_metadata(self):
+        return self._metadata
+
+    def set_metadata(self, metadata):
+        assert len(metadata) == BLOCK_SIZE - (BLOCKS_PER_ROW - 1)
+        self._metadata = metadata
+
     def gen_header(self):
         """
         Generate a header block.
         """
-        all = [secrets.token_bytes(BLOCK_ROW_DATA)]
+        all = []
         for nonce, authtag in zip(self._nonces, self._authtags):
             if nonce is None or authtag is None:
                 all.append(secrets.token_bytes(BLOCK_ROW_DATA))
                 continue
             packed = pack_nonce_and_authtag(nonce, authtag)
             all.append(packed)
-        return b''.join(all)
+        res = b''.join(all) + self._metadata
+        assert len(res) == BLOCK_SIZE
+        return res
 
     def __bytes__(self):
         header = self.gen_header()
