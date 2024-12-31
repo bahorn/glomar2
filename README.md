@@ -59,6 +59,29 @@ Finally when done, delete the block device with nbd-client:
 sudo nbd-client -d /dev/nbd0
 ```
 
+## Internals
+
+The core structure is what I'm calling a row, which is a bundle of blocks that
+can be used to store data and one header block.
+This is done so all the data blocks can have the same underlaying blocksize
+(512 bytes) and not have to keep the metadata inline in the block.
+The metadata is moved to the header block, which stores the nonce +
+authentication tag for each block (and maybe other metadata I need to store
+later on?)
+
+A single volume can have many rows concatenated to each other, you just index
+blocks by row.
+
+When you access a volume and give a key, you get a stream / partition which is
+created by looking at all the blocks and seeing which ones we can decrypt with
+that key. (TODO: Implement a bitmap lookup structure to make this less slow).
+
+The blocks used for each stream is random and decided at partition time, which
+only occurs once when you create the volume. While it is possible technically to
+create new partitions after the fact if you know all the keys, the code does not
+support this.
+
+
 ## License
 
 MIT
