@@ -409,7 +409,7 @@ class GlomarStore:
     def __init__(self, blob):
         self._blob = blob
         self._size = int(len(blob) / BLOCK_SIZE)
-        self._row_count = math.ceil(self._size / BLOCKS_PER_ROW)
+        self._row_count = math.floor(self._size / BLOCKS_PER_ROW)
         self._rows = []
         self._modified_rows = set()
         for i in range(self._row_count):
