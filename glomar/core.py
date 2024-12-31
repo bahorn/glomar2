@@ -79,17 +79,6 @@ def unpack_nonce_and_authtag(data):
     return nonce, authtag
 
 
-def pack_bitmap(offsets, size):
-    """
-    Pack a bitmap.
-    """
-    return b''
-
-
-def unpack_bitmap(bitmap):
-    pass
-
-
 def shuffle(lst):
     """
     A fisher-yates shuffle, which is suitable for our usecase.
