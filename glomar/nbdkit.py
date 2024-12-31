@@ -7,7 +7,7 @@ import builtins
 import nbdkit
 import math
 from core import GlomarStore, GlomarBaseKey, read_stream, write_stream
-from consts import BLOCK_SIZE
+from consts import BLOCK_SIZE, BLOCKS_PER_ROW
 
 API_VERSION = 2
 
@@ -21,8 +21,14 @@ def config(key, value):
 
 
 def flush_real():
-    with builtins.open(_config['disk'], 'wb') as f:
-        f.write(bytes(store))
+    assert store is not None
+
+    nbdkit.debug('flushing writes')
+    with builtins.open(_config['disk'], 'r+b') as f:
+        for row in store.modified_rows():
+            f.seek(row * BLOCK_SIZE * BLOCKS_PER_ROW)
+            f.write(bytes(store.get_row(row)))
+        store.reset_modified_rows()
 
 
 def open(readonly):

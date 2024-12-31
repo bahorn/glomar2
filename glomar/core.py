@@ -411,10 +411,25 @@ class GlomarStore:
         self._size = int(len(blob) / BLOCK_SIZE)
         self._row_count = math.ceil(self._size / BLOCKS_PER_ROW)
         self._rows = []
+        self._modified_rows = set()
         for i in range(self._row_count):
             row_data = get_block(self._blob, i, ROW_SIZE)
             row = GlomarRow(i * BLOCKS_PER_ROW, data=row_data)
             self._rows.append(row)
+
+    def modified_rows(self):
+        """
+        Tracking the rows that have been changed to just be a bit easier on the
+        disk.
+        """
+        return self._modified_rows
+
+    def reset_modified_rows(self):
+        """
+        Reset the rows which have been modified, to be called after a disk
+        flush.
+        """
+        self._modified_rows = set()
 
     def partition(self, streams):
         free_blocks = list(self.possible())
@@ -458,7 +473,11 @@ class GlomarStore:
         Write a block.
         """
         row_idx = map_idx_row(offset)
+        self._modified_rows = self._modified_rows.union([row_idx])
         self._rows[row_idx].set_and_encrypt(offset, key, data)
+
+    def get_row(self, row_idx):
+        return self._rows[row_idx]
 
     def get_iterative(self, key):
         """
