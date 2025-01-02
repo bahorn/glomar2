@@ -272,57 +272,6 @@ def map_idx_row(idx):
     return row
 
 
-class GlomarStoreOld:
-    """
-    Represents a store, which before packing exists just as a list of tuples of
-    (key, data).
-    """
-
-    def __init__(self, size):
-        self._size = size
-        self._blobs = []
-        assert size % BLOCKS_PER_ROW == 0
-        # determine all the free blocks, removing the first block in each row
-        # as that is used for metadata.
-        self._free_blocks = \
-            list(filter(lambda x: x % BLOCKS_PER_ROW != 0, range(size)))
-
-    def allocate(self, size):
-        """
-        Allocate free blocks.
-        """
-        self._free_blocks = shuffle(self._free_blocks)
-        allocated, self._free_blocks = \
-            self._free_blocks[:size], self._free_blocks[size:]
-        return sorted(allocated)
-
-    def add(self, key, data):
-        """
-        Add a new stream.
-        """
-        self._blobs.append((key, len(data), data))
-
-    def __bytes__(self):
-        """
-        Pack the store down to bytes.
-        """
-        row_count = math.ceil(self._size / BLOCKS_PER_ROW)
-        rows = [GlomarRow(i * BLOCKS_PER_ROW) for i in range(row_count)]
-        # add the meta data keys first so they can find them easier.
-        # we need sequential ids if the bitmap we are storing exceeds 512 * 8
-        # bits.
-
-        # Allocate blocks for each stream and store them in the desired row.
-        for key, length, blob in self._blobs:
-            allocated = self.allocate(block_count(length))
-            for idx, block in enumerate(allocated):
-                row_idx = map_idx_row(block)
-                curr_block = get_block(blob, idx)
-                rows[row_idx].set_and_encrypt(block, key, curr_block)
-
-        return b''.join(map(bytes, rows))
-
-
 def allocate_blocks(blocks, size):
     all_blocks = shuffle(blocks)
     allocated, left = all_blocks[:size], all_blocks[size:]
