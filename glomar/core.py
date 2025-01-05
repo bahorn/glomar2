@@ -13,7 +13,7 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from consts import \
     BLOCK_SIZE, KEYSIZE, BLOCKS_PER_ROW, \
-    ROW_SIZE, BLOCK_ROW_DATA
+    ROW_SIZE, BLOCK_ROW_DATA, ROW_METADATA_OFFSET, ROW_METADATA_SIZE
 from util import encrypt, decrypt
 
 
@@ -29,16 +29,6 @@ def get_block(data, idx, size=BLOCK_SIZE):
     Return the block at idx from data
     """
     return data[idx * size:(idx + 1) * size]
-
-
-def pad(data, size, byte_val=b'\x00'):
-    """
-    Just padding the data up to a certain size
-    """
-    to_add = size - (len(data) % size)
-    if to_add == 0 or to_add == size:
-        return data
-    return data + to_add * byte_val
 
 
 def pack_nonce_and_authtag(nonce, authtag):
@@ -176,7 +166,7 @@ class GlomarRow:
             )
             self._nonces.append(nonce)
             self._authtags.append(authtag)
-        self._metadata = index_block[BLOCK_ROW_DATA * (BLOCKS_PER_ROW - 1):]
+        self._metadata = index_block[ROW_METADATA_OFFSET:]
 
     def set_and_encrypt(self, idx, key, data):
         """
@@ -210,7 +200,7 @@ class GlomarRow:
         return self._metadata
 
     def set_metadata(self, metadata):
-        assert len(metadata) == BLOCK_SIZE - (BLOCKS_PER_ROW - 1)
+        assert len(metadata) == ROW_METADATA_SIZE
         self._metadata = metadata
 
     def gen_header(self):

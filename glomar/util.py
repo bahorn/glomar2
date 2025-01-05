@@ -3,6 +3,16 @@ from cryptography.exceptions import InvalidTag
 from consts import AUTHTAG_SIZE
 
 
+def pad(data, size, byte_val=b'\x00'):
+    """
+    Just padding the data up to a certain size
+    """
+    to_add = size - (len(data) % size)
+    if to_add == 0 or to_add == size:
+        return data
+    return data + to_add * byte_val
+
+
 def split_authtag(data, size=AUTHTAG_SIZE):
     """
     The authentication tag is 16 bytes appended to the data, which we need to
