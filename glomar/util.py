@@ -21,10 +21,13 @@ def split_authtag(data, size=AUTHTAG_SIZE):
     return data[:-size], data[-size:]
 
 
-def append_authtag(data, authtag):
+def append_authtag(data, authtag=None):
     """
     Append an authtag back so the block can be decrypted.
     """
+    # already included in data
+    if authtag is None:
+        return data
     assert len(authtag) == AUTHTAG_SIZE
     return data + authtag
 

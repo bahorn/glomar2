@@ -3,9 +3,6 @@ An implementation of a deniable storage system.
 
 The storage system lets you access block devices by providing a key to access
 them.
-
-Need to think of something to use the spare space in the row objects.
-32 bytes + 4 * 31. maybe construct a tree to store partition bitmaps.
 """
 import math
 import secrets
@@ -13,8 +10,10 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from consts import \
     BLOCK_SIZE, KEYSIZE, BLOCKS_PER_ROW, \
-    ROW_SIZE, BLOCK_ROW_DATA, ROW_METADATA_OFFSET, ROW_METADATA_SIZE
-from util import encrypt, decrypt
+    ROW_SIZE, BLOCK_ROW_DATA, ROW_METADATA_OFFSET, ROW_METADATA_SIZE, \
+    USABLE_METADATA_SIZE, NONCE_SIZE, MAX_TRIALS
+from util import encrypt, decrypt, pad
+from streammap import Bitmap, map_key_to_row, store_tree, get_leaves, TreeNode
 
 
 def block_count(data_len, size=BLOCK_SIZE):
@@ -63,25 +62,66 @@ def shuffle(lst):
     return res
 
 
-class GlomarBlockKey:
+class GlomarKey:
     """
     Key for block data.
     """
+    INFO = None
 
     def __init__(self, key):
         self._key = key
+        assert self.INFO is not None
 
-    def get(self, block_idx, size=KEYSIZE):
+    def get(self, block_idx=0, size=KEYSIZE):
         """
         A key for a block.
         """
+        info = self.INFO
+        info += block_idx.to_bytes(8, byteorder='big')
+
         hkdf = HKDF(
             algorithm=hashes.SHA256(),
             length=size,
-            info=b'BLCK_KEY' + block_idx.to_bytes(8, byteorder='big'),
+            info=info,
             salt=None,
         )
         return hkdf.derive(self._key)
+
+
+class GlomarBlockKey(GlomarKey):
+    """
+    Generic block key.
+    """
+    INFO = b'BLOCK_KEY'
+
+
+class GlomarBitmapKey(GlomarKey):
+    """
+    This key is used to store encrypt the bitmap.
+    """
+    INFO = b'BITMAP_KEY'
+
+
+class GlomarMapKey(GlomarKey):
+    """
+    This key is used to map the tree to a row index and is not directly used
+    for encryption.
+    """
+    INFO = b'MAP_KEY'
+
+
+class GlomarRootKey(GlomarKey):
+    """
+    The root of the tree is encrypted using this key.
+    """
+    INFO = b'ROOT_KEY'
+
+
+class GlomarTreeKey(GlomarKey):
+    """
+    Each non-root node of the tree is encrypted using this key.
+    """
+    INFO = b'TREE_KEY'
 
 
 class GlomarBaseKey:
@@ -102,6 +142,18 @@ class GlomarBaseKey:
 
     def block_key(self):
         return GlomarBlockKey(self._key)
+
+    def bitmap_key(self):
+        return GlomarBitmapKey(self._key)
+
+    def map_key(self):
+        return GlomarMapKey(self._key)
+
+    def root_key(self):
+        return GlomarRootKey(self._key)
+
+    def tree_key(self):
+        return GlomarTreeKey(self._key)
 
 
 class GlomarBlock:
@@ -199,9 +251,25 @@ class GlomarRow:
     def get_metadata(self):
         return self._metadata
 
+    def get_and_decrypt_metadata(self, key):
+        metadata = self.get_metadata()
+        nonce, data = metadata[:NONCE_SIZE], metadata[NONCE_SIZE:]
+        return decrypt(key.get(self._offset), nonce, None, data)
+
     def set_metadata(self, metadata):
         assert len(metadata) == ROW_METADATA_SIZE
         self._metadata = metadata
+
+    def set_and_encrypt_metadata(self, key, metadata):
+        assert len(metadata) == USABLE_METADATA_SIZE
+        nonce = secrets.token_bytes(12)
+        encrypted_metadata, auth_tag = encrypt(
+            key.get(self._offset),
+            nonce,
+            metadata
+        )
+        packed = nonce + encrypted_metadata + auth_tag
+        self.set_metadata(packed)
 
     def gen_header(self):
         """
@@ -237,16 +305,19 @@ def allocate_blocks(blocks, size):
     return sorted(allocated), left
 
 
-class GlomarStream:
+class GlomarStreamRaw:
     """
-    Wrapper around a stream.
+    Wrapper around a stream, with defined offsets.
     """
 
-    def __init__(self, store, key):
+    def __init__(self, store, key, offsets=None):
         self._store = store
-        self._key = key
-        self._offsets = []
-        self._find_offsets()
+        self._key = key.block_key() if isinstance(key, GlomarBaseKey) else key
+        self._offsets = self._find_offsets(store, key) \
+            if offsets is None else offsets
+
+    def _find_offsets(self, store, key):
+        return []
 
     def size(self):
         return len(self._offsets)
@@ -256,31 +327,79 @@ class GlomarStream:
             raise Exception('Out of bounds!')
         return self._offsets[offset]
 
-    def _find_offsets(self):
-        """
-        Iterate through each block in the store and see which ones we can
-        decrypt.
-        """
-        # find all the offsets by iterating through each block and seeing if
-        # the key can decrypt it.
-        for offset in self._store.possible():
-            res = self._store.get_block(offset, self._key)
-            if res is None:
-                continue
-            self._offsets.append(offset)
-
     def read(self, idx):
         """
         Read the block at idx.
         """
-        block = self._store.get_block(self._translate_offset(idx), self._key)
+        block = self._store.get_block(
+            self._translate_offset(idx),
+            self._key
+        )
         return bytes(block)
 
     def write(self, idx, data):
         """
         Write a block at idx.
         """
-        self._store.set_block(self._translate_offset(idx), self._key, data)
+        self._store.set_block(
+            self._translate_offset(idx),
+            self._key,
+            data
+        )
+
+
+class GlomarStream(GlomarStreamRaw):
+    """
+    Stream where the offsets are discovered iteratively.
+    """
+
+    def _find_offsets(self, store, key):
+        """
+        Iterate through each block in the store and see which ones we can
+        decrypt.
+        """
+        # find all the offsets by iterating through each block and seeing if
+        # the key can decrypt it.
+        offsets = []
+        for offset in store.possible():
+            res = store.get_block(offset, key)
+            if res is None:
+                continue
+            offsets.append(offset)
+        return offsets
+
+
+class GlomarStreamRandomAccess(GlomarStream):
+    """
+    A Glomar stream implementing random access.
+    """
+
+    def _find_offsets(self, store, key):
+        """
+        Dumping the bitmap out to determine which offsets are there.
+        """
+        map_key = key.map_key()
+        root_key = key.root_key()
+        tree_key = key.tree_key()
+        bitmap_key = key.bitmap_key()
+        for i in range(MAX_TRIALS):
+            row_idx = map_key_to_row(
+                map_key.get(),
+                store.row_count(),
+                i
+            )
+            possible_row = store.get_row(row_idx)
+            possible = possible_row.get_and_decrypt_metadata(root_key)
+            if possible is None:
+                continue
+            root = TreeNode(row_idx, possible)
+            leaves = get_leaves(store, tree_key, root)
+            raw_bitmap = read_stream(
+                GlomarStreamRaw(store, bitmap_key, leaves)
+            )
+            return Bitmap(len(raw_bitmap) * 8, bitmap=raw_bitmap).get_offsets()
+
+        raise Exception('Could get bitmap')
 
 
 # https://stackoverflow.com/questions/312443/how-do-i-split-a-list-into-equally-sized-chunks
@@ -305,7 +424,6 @@ def read_stream(stream, start=0, end=None):
     _end = end
     if _end is None:
         _end = stream.size()
-    print(start, _end)
     return b''.join(stream.read(i) for i in range(start, _end))
 
 
@@ -324,6 +442,10 @@ class GlomarStore:
             row_data = get_block(self._blob, i, ROW_SIZE)
             row = GlomarRow(i * BLOCKS_PER_ROW, data=row_data)
             self._rows.append(row)
+        self._free_rows = []
+
+    def row_count(self):
+        return self._row_count
 
     def modified_rows(self):
         """
@@ -339,20 +461,90 @@ class GlomarStore:
         """
         self._modified_rows = set()
 
-    def partition(self, streams):
-        free_blocks = list(self.possible())
-        for key, length in streams:
-            allocated, free_blocks = allocate_blocks(
-                free_blocks, block_count(length)
-            )
-            if len(allocated) != block_count(length):
-                raise Exception('Not enough space!')
+    def _allocate(self, key, length, free_blocks, data=None, initialize=True):
+        allocated, free_blocks = allocate_blocks(
+            free_blocks, block_count(length)
+        )
+        if len(allocated) != block_count(length):
+            raise Exception('Not enough space!')
+
+        if data:
+            write_stream(self.get_raw(key, allocated), data)
+
+        if data is None and initialize:
             for idx in allocated:
                 self.set_block(
                     idx,
-                    key.block_key(),
+                    key,
                     secrets.token_bytes(BLOCK_SIZE)
                 )
+        return allocated, free_blocks
+
+    def allocate_row(self):
+        allocated, self._free_rows = allocate_blocks(self._free_rows, 1)
+        return allocated[0]
+
+    def partition(self, streams, initialize=True):
+        """
+        partition the store.
+
+        You can set initialize to false if you are using a bitmap to index the
+        streams, otherwise you need it set to find the allocated blocks.
+        """
+        free_blocks = list(self.possible())
+        bitmaps = []
+        metadata = []
+        # first we allocate the streams normally.
+        for key, length in streams:
+            allocated, free_blocks = self._allocate(
+                key.block_key(), length, free_blocks, initialize=initialize
+            )
+            bitmap = Bitmap(BLOCKS_PER_ROW * self._row_count)
+            bitmap.set_bits(allocated)
+            bitmaps.append((key, bytes(bitmap)))
+
+        # now we add in the bitmaps
+        for key, bitmap in bitmaps:
+            allocated, free_blocks = self._allocate(
+                key.bitmap_key(),
+                len(bitmap),
+                free_blocks,
+                pad(bitmap, BLOCK_SIZE)
+            )
+            metadata.append((key, allocated))
+
+        seen = set([None])
+        metadata_dict = {}
+        # get the row where the root of the tree is stored.
+        for key, blocks in metadata:
+            row_idx = None
+            for _ in range(MAX_TRIALS):
+                # we generate i randomly to avoid an attack.
+                # basically, if you do this sequentially it becomes possible to
+                # infer that another stream exists if you have a stream that is
+                # mapped to what would be its index 0.
+                i = secrets.randbelow(MAX_TRIALS)
+                row_idx_ = map_key_to_row(
+                    key.map_key().get(),
+                    self._row_count,
+                    i
+                )
+                if row_idx_ not in seen:
+                    seen.add(row_idx_)
+                    row_idx = row_idx_
+                    break
+            if row_idx is None:
+                raise Exception('too many collisions!')
+
+            metadata_dict[row_idx] = (key, blocks)
+
+        self._free_rows = list(filter(
+            lambda x: x not in seen,
+            [i for i in range(self._row_count)]
+        ))
+
+        for row_idx, (key, blocks) in metadata_dict.items():
+            store_tree(self, key, blocks, root=row_idx)
 
     def size(self):
         """
@@ -393,6 +585,15 @@ class GlomarStore:
         if we can decrypt it.
         """
         return GlomarStream(self, key)
+
+    def get_raw(self, key, offsets):
+        """
+        A stream with predefined offsets.
+        """
+        return GlomarStreamRaw(self, key, offsets)
+
+    def get_random(self, key):
+        return GlomarStreamRandomAccess(self, key)
 
     def __bytes__(self):
         return b''.join(map(bytes, self._rows))

@@ -20,20 +20,40 @@ def test_row():
             assert b.get_and_decrypt(i * ROW_SIZE + j, key.block_key())
 
 
-def test():
-    test_row()
+def test_iterative():
     key = GlomarBaseKey(b'\x01\x02\x03\x04\x05\x06\x07\x08')
-    data = pad(open('/etc/passwd', 'rb').read(), BLOCK_SIZE)
+    data = pad(secrets.token_bytes(BLOCK_SIZE*512), BLOCK_SIZE)
     gs = GlomarStore(secrets.token_bytes(BLOCK_SIZE * 1024))
     gs.partition([(key, len(data))])
     s = gs.get_iterative(key.block_key())
     write_stream(s, data)
-    print(read_stream(s))
+    assert read_stream(s) == data
     d = bytes(gs)
     gsb = GlomarStore(d)
     it = gsb.get_iterative(key.block_key())
     assert it.size() > 0
-    print(read_stream(s))
+    assert read_stream(s) == data
+
+
+def test_randomaccess():
+    key = GlomarBaseKey(b'\x01\x02\x03\x04\x05\x06\x07\x08')
+    data = pad(secrets.token_bytes(BLOCK_SIZE*512), BLOCK_SIZE)
+    gs = GlomarStore(secrets.token_bytes(BLOCK_SIZE * 1024))
+    gs.partition([(key, len(data))])
+    s = gs.get_random(key)
+    write_stream(s, data)
+    assert read_stream(s) == data
+    d = bytes(gs)
+    gsb = GlomarStore(d)
+    it = gsb.get_random(key)
+    assert it.size() > 0
+    assert read_stream(s) == data
+
+
+def test():
+    test_row()
+    test_iterative()
+    test_randomaccess()
 
 
 def extract_partitions(parts):
