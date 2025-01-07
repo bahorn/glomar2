@@ -74,7 +74,9 @@ blocks by row.
 
 When you access a volume and give a key, you get a stream / partition which is
 created by looking at all the blocks and seeing which ones we can decrypt with
-that key. (TODO: Implement a bitmap lookup structure to make this less slow).
+that key.
+To make lookup less slow, you first look at the row headers to find a bitmap
+describing which blocks are used for the stream.
 
 The blocks used for each stream is random and decided at partition time, which
 only occurs once when you create the volume. While it is possible technically to
