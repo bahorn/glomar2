@@ -12,8 +12,8 @@ time and compare which blocks changed.
 You should treat these as a write-once, read-many sort of thing.
 
 As always, I wrote this for fun so don't use it for anything serious.
-This is insanely slow as it essentially does random access to read each 512 byte
-block, and doesn't have any concept of extents.
+This is insanely slow as it essentially does random access to read each 4096 
+byte block, and doesn't have any concept of extents.
 
 ## Usage
 

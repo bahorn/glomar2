@@ -74,13 +74,18 @@ def export_description(h):
 
 
 def pread(h, buf, offset, flags):
-    to_read = math.ceil(len(buf) / BLOCK_SIZE)
+    buf_len = len(buf)
+    to_read = math.ceil(buf_len / BLOCK_SIZE)
     start_offset = offset % BLOCK_SIZE
     if start_offset != 0:
         to_read += 1
     start_block = math.floor(offset / BLOCK_SIZE)
     end_block = start_block + to_read
-    buf[:] = read_stream(h, start=start_block, end=end_block)[start_offset:]
+    res = read_stream(
+        h, start=start_block, end=end_block
+    )[start_offset:start_offset + buf_len]
+    # nbdkit.debug(f'{len(res)} {len(buf[:])}')
+    buf[:] = res
 
 
 def pwrite(h, buf, offset, flags):
