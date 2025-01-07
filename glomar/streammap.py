@@ -45,7 +45,7 @@ from cryptography.hazmat.primitives import hashes, hmac
 def is_leaf(idx):
     """
     Intermediate nodes are stored in the row header, so we know nodes that
-    aren't must be leaves.
+    aren't must be a leaf.
     """
     return (idx % BLOCKS_PER_ROW) != 0
 
@@ -60,15 +60,14 @@ class TreeNode:
         self._children = []
         if children is None:
             return
-
         for i in range(0, len(children), 4):
-            child_b = children[i * 4: (i + 1) * 4]
+            child_b = children[i:i+4]
             k = struct.unpack('>I', child_b)[0]
             if not valid_idx(k):
                 break
             self._children.append(k)
 
-        assert len(self._children) < TREE_IDX_COUNT
+        assert len(self._children) <= TREE_IDX_COUNT
 
     def index(self):
         return self._idx
@@ -96,6 +95,7 @@ class TreeNode:
 
     def __bytes__(self):
         assert self._idx is not None
+        assert len(self._children) != 0
         res = b''.join(map(lambda x: struct.pack('>I', x), self._children))
         res = pad(res, USABLE_METADATA_SIZE, byte_val=b'\xff')
         assert len(res) == USABLE_METADATA_SIZE
@@ -115,14 +115,12 @@ def get_leaves(store, key, root):
         if is_leaf(child):
             leaves.append(child)
             continue
-
-        possible_row = store.get_row(child)
-        possible = possible_row.get_and_decrypt_metadata(key)
+        row_idx = child // BLOCKS_PER_ROW
+        possible = store.get_row(row_idx).get_and_decrypt_metadata(key)
         if possible is None:
             raise Exception('child did not decrypt?!')
 
         leaves += get_leaves(store, key, TreeNode(child, possible))
-
     return leaves
 
 
@@ -138,10 +136,9 @@ def store_tree(store, key, leaves, root=0):
             row_idx = store.allocate_row()
             real_idx = row_idx * BLOCKS_PER_ROW
             t = TreeNode(real_idx)
-            t.add_children(leaves[i * TREE_IDX_COUNT:(i + 1)*TREE_IDX_COUNT])
+            t.add_children(leaves[i:i+TREE_IDX_COUNT])
             next_layer.append(real_idx)
             # store it.
-            row_idx = store.allocate_row()
             store.get_row(row_idx).set_and_encrypt_metadata(
                 key.tree_key(), bytes(t)
             )
@@ -160,7 +157,7 @@ class Bitmap:
     """
 
     def __init__(self, size, start=0, bitmap=None):
-        assert math.log2(size).is_integer()
+        assert size % 8 == 0
         self._start = start
         self._size = size
         self._bitmap = list(bitmap) if bitmap else [0] * (self._size // 8)

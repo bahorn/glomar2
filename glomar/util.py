@@ -62,6 +62,8 @@ def pad(data, size, byte_val=b'\x00'):
     """
     Just padding the data up to a certain size
     """
+    if len(data) == 0:
+        return size * byte_val
     to_add = size - (len(data) % size)
     if to_add == 0 or to_add == size:
         return data

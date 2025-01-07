@@ -36,10 +36,25 @@ def test_iterative():
     assert read_stream(s) == data
 
 
-def test_randomaccess():
+def test_randomaccess_two_blocks():
     key = GlomarBaseKey(b'\x01\x02\x03\x04\x05\x06\x07\x08')
-    data = pad(secrets.token_bytes(BLOCK_SIZE*512), BLOCK_SIZE)
-    gs = GlomarStore(secrets.token_bytes(BLOCK_SIZE * 1024))
+    data = pad(secrets.token_bytes(20971), BLOCK_SIZE)
+    gs = GlomarStore(pad(b'', BLOCK_SIZE ** 2 * 10 + BLOCK_SIZE*16*32))
+    gs.partition([(key, len(data))])
+    s = gs.get_random(key)
+    write_stream(s, data)
+    assert read_stream(s) == data
+    d = bytes(gs)
+    gsb = GlomarStore(d)
+    it = gsb.get_random(key)
+    assert it.size() > 0
+    assert read_stream(s) == data
+
+
+def test_randomaccess_large():
+    key = GlomarBaseKey(b'\x01\x02\x03\x04\x05\x06\x07\x08')
+    data = pad(secrets.token_bytes(2621440), BLOCK_SIZE)
+    gs = GlomarStore(pad(b'', 67108864))
     gs.partition([(key, len(data))])
     s = gs.get_random(key)
     write_stream(s, data)
@@ -54,7 +69,8 @@ def test_randomaccess():
 def test():
     test_row()
     test_iterative()
-    test_randomaccess()
+    test_randomaccess_two_blocks()
+    test_randomaccess_large()
 
 
 def extract_partitions(parts):

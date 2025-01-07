@@ -22,8 +22,8 @@ class GlomarStreamRaw:
         return len(self._offsets)
 
     def _translate_offset(self, offset):
-        if offset > len(self._offsets):
-            raise Exception('Out of bounds!')
+        if offset >= len(self._offsets):
+            raise Exception(f'Out of bounds! {offset} {len(self._offsets)}')
         return self._offsets[offset]
 
     def read(self, idx):
@@ -96,7 +96,8 @@ class GlomarStreamRandomAccess(GlomarStream):
             raw_bitmap = read_stream(
                 GlomarStreamRaw(store, bitmap_key, leaves)
             )
-            return Bitmap(len(raw_bitmap) * 8, bitmap=raw_bitmap).get_offsets()
+            res = Bitmap(len(raw_bitmap) * 8, bitmap=raw_bitmap).get_offsets()
+            return res
 
         raise Exception('Could get bitmap')
 

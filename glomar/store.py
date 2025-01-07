@@ -316,7 +316,16 @@ class GlomarStore:
         self._rows[row_idx].set_and_encrypt(offset, key, data)
 
     def get_row(self, row_idx):
-        return self._rows[row_idx]
+        try:
+            return self._rows[row_idx]
+        except IndexError:
+            raise Exception(f'{row_idx} {self._row_count}')
+
+    def get_row_real(self, idx):
+        """
+        map the real idx to a row.
+        """
+        return idx // BLOCKS_PER_ROW
 
     def get_iterative(self, key):
         """

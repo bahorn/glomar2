@@ -47,7 +47,7 @@ def open(readonly):
         with builtins.open(_config['disk'], 'rb') as f:
             store = GlomarStore(f.read())
 
-    res = store.get_iterative(key.block_key())
+    res = store.get_random(key)
 
     return res
 
