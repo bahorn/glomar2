@@ -1,6 +1,61 @@
+import math
+import secrets
 from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
 from cryptography.exceptions import InvalidTag
-from consts import AUTHTAG_SIZE
+from consts import AUTHTAG_SIZE, BLOCK_SIZE
+
+
+def block_count(data_len, size=BLOCK_SIZE):
+    """
+    Map the length to a number of blocks.
+    """
+    return math.ceil(data_len / size)
+
+
+def get_block(data, idx, size=BLOCK_SIZE):
+    """
+    Return the block at idx from data
+    """
+    return data[idx * size:(idx + 1) * size]
+
+
+def pack_nonce_and_authtag(nonce, authtag):
+    """
+    pack the nonce and authtag into BLOCK_ROW_DATA bytes
+    """
+    assert len(nonce) == 12
+    assert len(authtag) == 16
+    return nonce + authtag
+
+
+def unpack_nonce_and_authtag(data):
+    """
+    Extract the nonce and authtag from data
+    """
+    nonce = data[:12]
+    authtag = data[12:12 + 16]
+    assert len(nonce) == 12
+    assert len(authtag) == 16
+    return nonce, authtag
+
+
+def shuffle(lst):
+    """
+    A fisher-yates shuffle, which is suitable for our usecase.
+    """
+    res = lst.copy()
+    n = len(res)
+    for i in range(0, n - 1):
+        j = i + secrets.randbelow(n - i)
+        res[j], res[i] = res[i], res[j]
+    return res
+
+
+# https://stackoverflow.com/questions/312443/how-do-i-split-a-list-into-equally-sized-chunks
+def chunks(lst, n):
+    """Yield successive n-sized chunks from lst."""
+    for i in range(0, len(lst), n):
+        yield lst[i:i + n]
 
 
 def pad(data, size, byte_val=b'\x00'):
