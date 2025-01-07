@@ -6,7 +6,8 @@ import binascii
 import builtins
 import nbdkit
 import math
-from core import GlomarStore, GlomarBaseKey, read_stream, write_stream
+from core import GlomarStore, read_stream, write_stream
+from keys import GlomarBaseKey
 from consts import BLOCK_SIZE, BLOCKS_PER_ROW
 
 API_VERSION = 2
