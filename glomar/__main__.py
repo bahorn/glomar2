@@ -1,7 +1,8 @@
 import argparse
 import binascii
 import secrets
-from core import GlomarRow, GlomarStore, read_stream, write_stream
+from store import GlomarRow, GlomarStore
+from streams import read_stream, write_stream
 from keys import GlomarBaseKey
 from consts import ROW_SIZE, BLOCK_SIZE
 from util import pad
